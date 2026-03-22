@@ -5,7 +5,6 @@ import com.codeflow.enums.NodeType;
 import com.codeflow.model.FlowEdge;
 import com.codeflow.model.FlowNode;
 import com.codeflow.parser.CodeParser;
-import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
@@ -78,9 +77,9 @@ public class MainView {
             CodeParser parser = new CodeParser();
             lastResult = parser.parse(codeEditor.getText());
 
-            engine = new ExecutionEngine(lastResult.flowNodes);
+            engine = new ExecutionEngine(lastResult.flowNodes, lastResult.variables);
+            updateVariables(engine.getVariables());
 
-            updateVariables(lastResult.variables);
             drawFlow(lastResult.flowNodes, lastResult.flowEdges);
 
             statusLabel.setText("Analyze complete. Nodes: " + lastResult.flowNodes.size());
@@ -104,14 +103,15 @@ public class MainView {
 
         FlowNode node = engine.step();
         if (node == null) {
+            updateVariables(engine.getVariables());
             statusLabel.setText("Execution complete.");
             return;
         }
 
         highlight(node);
+        updateVariables(engine.getVariables());
         statusLabel.setText("Stepped: " + node.label);
     }
-
 
     private void updateVariables(Map<String, Object> vars) {
         variablePanel.getChildren().clear();

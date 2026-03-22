@@ -1,11 +1,10 @@
 package com.codeflow.model;
 
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class ExecutionContext {
-
-    public Map<String, Object> variables = new HashMap<>();
-    public int currentStep = 0;
-
+    public Map<String, Object> variables = new LinkedHashMap<>();
+    public String currentNodeId;
+    public boolean finished = false;
 }

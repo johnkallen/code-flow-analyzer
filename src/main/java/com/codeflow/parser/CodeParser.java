@@ -1,16 +1,23 @@
 package com.codeflow.parser;
 
-import com.codeflow.enums.NodeType;
 import com.codeflow.model.FlowEdge;
 import com.codeflow.model.FlowNode;
+import com.codeflow.enums.NodeType;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
-import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
-import com.github.javaparser.ast.stmt.*;
+import com.github.javaparser.ast.stmt.BlockStmt;
+import com.github.javaparser.ast.stmt.IfStmt;
+import com.github.javaparser.ast.stmt.ReturnStmt;
+import com.github.javaparser.ast.stmt.Statement;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 public class CodeParser {
 
@@ -38,8 +45,7 @@ public class CodeParser {
             return result;
         }
 
-        BlockStmt body = methodOpt.get().getBody().get();
-        List<Statement> statements = body.getStatements();
+        List<Statement> statements = methodOpt.get().getBody().get().getStatements();
 
         double centerX = 300;
         double currentY = 40;
@@ -50,9 +56,7 @@ public class CodeParser {
 
         FlowNode previous = null;
 
-        for (int i = 0; i < statements.size(); i++) {
-            Statement stmt = statements.get(i);
-
+        for (Statement stmt : statements) {
             if (stmt instanceof IfStmt ifStmt) {
                 FlowNode decision = new FlowNode(
                         UUID.randomUUID().toString(),
@@ -63,9 +67,11 @@ public class CodeParser {
                         width,
                         height
                 );
+                decision.condition = ifStmt.getCondition().toString();
                 result.flowNodes.add(decision);
 
                 if (previous != null) {
+                    previous.nextId = decision.id;
                     result.flowEdges.add(new FlowEdge(previous.id, decision.id, ""));
                 }
 
@@ -74,32 +80,22 @@ public class CodeParser {
 
                 double branchY = currentY + verticalGap;
 
-                Statement thenStmt = ifStmt.getThenStmt();
-                if (thenStmt instanceof BlockStmt thenBlock && !thenBlock.getStatements().isEmpty()) {
-                    Statement firstThen = thenBlock.getStatement(0);
-                    thenNode = createSimpleNode(firstThen, centerX - branchOffset, branchY, width, height);
+                Statement thenStmt = unwrapFirst(ifStmt.getThenStmt());
+                if (thenStmt != null) {
+                    thenNode = createProcessNode(thenStmt, centerX - branchOffset, branchY, width, height);
                     result.flowNodes.add(thenNode);
                     result.flowEdges.add(new FlowEdge(decision.id, thenNode.id, "Yes"));
-                } else if (!(thenStmt instanceof BlockStmt)) {
-                    thenNode = createSimpleNode(thenStmt, centerX - branchOffset, branchY, width, height);
-                    result.flowNodes.add(thenNode);
-                    result.flowEdges.add(new FlowEdge(decision.id, thenNode.id, "Yes"));
+                    decision.trueNextId = thenNode.id;
                 }
 
                 if (ifStmt.getElseStmt().isPresent()) {
-                    Statement elseStmt = ifStmt.getElseStmt().get();
-                    if (elseStmt instanceof BlockStmt elseBlock && !elseBlock.getStatements().isEmpty()) {
-                        Statement firstElse = elseBlock.getStatement(0);
-                        elseNode = createSimpleNode(firstElse, centerX + branchOffset, branchY, width, height);
+                    Statement elseStmt = unwrapFirst(ifStmt.getElseStmt().get());
+                    if (elseStmt != null) {
+                        elseNode = createProcessNode(elseStmt, centerX + branchOffset, branchY, width, height);
                         result.flowNodes.add(elseNode);
                         result.flowEdges.add(new FlowEdge(decision.id, elseNode.id, "No"));
-                    } else if (!(elseStmt instanceof BlockStmt)) {
-                        elseNode = createSimpleNode(elseStmt, centerX + branchOffset, branchY, width, height);
-                        result.flowNodes.add(elseNode);
-                        result.flowEdges.add(new FlowEdge(decision.id, elseNode.id, "No"));
+                        decision.falseNextId = elseNode.id;
                     }
-                } else {
-                    result.flowEdges.add(new FlowEdge(decision.id, null, "No"));
                 }
 
                 FlowNode joinNode = new FlowNode(
@@ -111,27 +107,33 @@ public class CodeParser {
                         width,
                         height
                 );
+                joinNode.expression = null;
                 result.flowNodes.add(joinNode);
 
                 if (thenNode != null) {
+                    thenNode.nextId = joinNode.id;
                     result.flowEdges.add(new FlowEdge(thenNode.id, joinNode.id, ""));
                 } else {
+                    decision.trueNextId = joinNode.id;
                     result.flowEdges.add(new FlowEdge(decision.id, joinNode.id, "Yes"));
                 }
 
                 if (elseNode != null) {
+                    elseNode.nextId = joinNode.id;
                     result.flowEdges.add(new FlowEdge(elseNode.id, joinNode.id, ""));
                 } else {
+                    decision.falseNextId = joinNode.id;
                     result.flowEdges.add(new FlowEdge(decision.id, joinNode.id, "No"));
                 }
 
                 previous = joinNode;
                 currentY += verticalGap * 3;
             } else {
-                FlowNode node = createSimpleNode(stmt, centerX, currentY, width, height);
+                FlowNode node = createProcessNode(stmt, centerX, currentY, width, height);
                 result.flowNodes.add(node);
 
                 if (previous != null) {
+                    previous.nextId = node.id;
                     result.flowEdges.add(new FlowEdge(previous.id, node.id, ""));
                 }
 
@@ -143,22 +145,33 @@ public class CodeParser {
         return result;
     }
 
-    private FlowNode createSimpleNode(Statement stmt, double x, double y, double width, double height) {
-        NodeType type = NodeType.PROCESS;
-
-        if (stmt instanceof ReturnStmt) {
-            type = NodeType.END;
+    private Statement unwrapFirst(Statement stmt) {
+        if (stmt instanceof BlockStmt block) {
+            if (block.getStatements().isEmpty()) {
+                return null;
+            }
+            return block.getStatement(0);
         }
+        return stmt;
+    }
 
-        String label = stmt.toString().trim();
-        return new FlowNode(
+    private FlowNode createProcessNode(Statement stmt, double x, double y, double width, double height) {
+        NodeType type = stmt instanceof ReturnStmt ? NodeType.END : NodeType.PROCESS;
+
+        FlowNode node = new FlowNode(
                 UUID.randomUUID().toString(),
-                label,
+                stmt.toString().trim(),
                 type,
                 x,
                 y,
                 width,
                 height
         );
+
+        if (type == NodeType.PROCESS) {
+            node.expression = stmt.toString().trim();
+        }
+
+        return node;
     }
 }

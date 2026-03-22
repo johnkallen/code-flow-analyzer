@@ -1,6 +1,5 @@
 package com.codeflow.model;
 
-
 import com.codeflow.enums.NodeType;
 
 public class FlowNode {
@@ -11,6 +10,15 @@ public class FlowNode {
     public double y;
     public double width;
     public double height;
+
+    // execution metadata
+    public String variableName;
+    public String expression;
+    public String condition;
+
+    public String nextId;
+    public String trueNextId;
+    public String falseNextId;
 
     public FlowNode(String id, String label, NodeType type, double x, double y, double width, double height) {
         this.id = id;
