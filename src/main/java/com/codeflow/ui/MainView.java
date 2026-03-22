@@ -2,6 +2,7 @@ package com.codeflow.ui;
 
 import com.codeflow.engine.ExecutionEngine;
 import com.codeflow.enums.NodeType;
+import com.codeflow.model.FlowEdge;
 import com.codeflow.model.FlowNode;
 import com.codeflow.parser.CodeParser;
 import javafx.geometry.Pos;
@@ -17,6 +18,7 @@ import javafx.scene.shape.Polygon;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.Shape;
 import javafx.scene.text.Text;
+import javafx.scene.text.TextAlignment;
 
 import java.util.HashMap;
 import java.util.List;
@@ -31,29 +33,31 @@ public class MainView {
     private final Label statusLabel = new Label("Paste code and click Analyze.");
 
     private ExecutionEngine engine;
+    private CodeParser.ParseResult lastResult;
+
     private Map<String, Shape> nodeShapes = new HashMap<>();
 
     public MainView() {
 
         // Top panel (variables)
         variablePanel.setPrefHeight(120);
-        variablePanel.setStyle("-fx-background-color: #eeeeee; -fx-padding: 10;");
+        variablePanel.setStyle("-fx-background-color: #eeeeee; -fx-padding: 10; -fx-spacing: 5;");
 
-        // Split center
-        SplitPane split = new SplitPane();
-        flowPane.setPrefSize(600, 1000);
+        flowPane.setPrefSize(1000, 1000);
         flowPane.setStyle("-fx-background-color: white;");
         codeEditor.setPrefWidth(500);
 
+        // Split center
+        SplitPane split = new SplitPane();
         split.getItems().addAll(codeEditor, flowPane);
-        split.setDividerPositions(0.5);
+        split.setDividerPositions(0.3);
 
         // Bottom controls
         Button analyzeBtn = new Button("Analyze");
         Button stepBtn = new Button("Step");
         Button exportBtn = new Button("Export");
 
-        HBox controls = new HBox(10, analyzeBtn, stepBtn, exportBtn);
+        HBox controls = new HBox(10, analyzeBtn, stepBtn, statusLabel, exportBtn);
         controls.setStyle("-fx-padding: 10;");
 
         root.setTop(variablePanel);
@@ -72,22 +76,21 @@ public class MainView {
     private void analyzeCode() {
         try {
             CodeParser parser = new CodeParser();
-            CodeParser.ParseResult result = parser.parse(codeEditor.getText());
+            lastResult = parser.parse(codeEditor.getText());
 
-            engine = new ExecutionEngine(result.flowNodes);
+            engine = new ExecutionEngine(lastResult.flowNodes);
 
-            updateVariables(result.variables);
-            drawFlow(result.flowNodes);
+            updateVariables(lastResult.variables);
+            drawFlow(lastResult.flowNodes, lastResult.flowEdges);
 
-            statusLabel.setText("Analyze complete. Nodes: " + result.flowNodes.size());
-            System.out.println("Engine created with " + result.flowNodes.size() + " nodes.");
+            statusLabel.setText("Analyze complete. Nodes: " + lastResult.flowNodes.size());
 
         } catch (Exception ex) {
             engine = null;
+            lastResult = null;
             variablePanel.getChildren().clear();
             flowPane.getChildren().clear();
             nodeShapes.clear();
-
             statusLabel.setText("Analyze failed: " + ex.getMessage());
             ex.printStackTrace();
         }
@@ -123,89 +126,104 @@ public class MainView {
 
 
 
-    private void drawFlow(List<FlowNode> nodes) {
+    private void drawFlow(List<FlowNode> nodes, List<FlowEdge> edges) {
         flowPane.getChildren().clear();
         nodeShapes.clear();
 
-        int y = 20;
+        for (FlowEdge edge : edges) {
+
+            if (edge.toId == null) {
+                continue;
+            }
+
+            FlowNode from = findNodeById(nodes, edge.fromId);
+            FlowNode to = findNodeById(nodes, edge.toId);
+
+            if (from == null || to == null) {
+                continue;
+            }
+
+            double fromX = from.x + (from.width / 2);
+            double fromY = from.y + from.height;
+            double toX = to.x + (to.width / 2);
+            double toY = to.y;
+
+            // Draw Connecting Line
+            Line line = new Line(fromX, fromY, toX, toY);
+            line.setStroke(Color.BLACK);
+            line.setStrokeWidth(2);
+            flowPane.getChildren().add(line);
+
+            if (edge.label != null && !edge.label.isBlank()) {
+                Text edgeText = new Text(edge.label);
+                edgeText.setX((fromX + toX) / 2 + 5);
+                edgeText.setY((fromY + toY) / 2 - 5);
+                flowPane.getChildren().add(edgeText);
+            }
+        }
 
         for (FlowNode node : nodes) {
-
-            if (y > 20) {
-                Line line = new Line(150, y - 50, 150, y);
-                line.setStroke(Color.BLACK);
-                line.setStrokeWidth(2);
-                flowPane.getChildren().add(line);
-            }
-
-            StackPane nodePane = new StackPane();
-            nodePane.setLayoutX(50);
-            nodePane.setLayoutY(y);
-            nodePane.setPrefSize(200, 50);
-            nodePane.setMinSize(200, 50);
-            nodePane.setMaxSize(200, 50);
-
-            // Create Shape and Text
-            Shape shape;
-            switch (node.type) {
-                case DECISION:
-                    shape = new Polygon(
-                            100, 0,
-                            200, 25,
-                            100, 50,
-                            0, 25
-                    );
-                    break;
-
-                case END:
-                    shape = new Rectangle(200, 50);
-                    break;
-
-                case START:
-                case PROCESS:
-                default:
-                    shape = new Rectangle(200, 50);
-                    break;
-            }
-
-            shape.setFill(javafx.scene.paint.Color.WHITE);
-            shape.setStroke(javafx.scene.paint.Color.BLACK);
+            Shape shape = createShape(node);
+            shape.setFill(Color.WHITE);
+            shape.setStroke(Color.BLACK);
             shape.setStrokeWidth(2);
 
-            // Create centered label
-            Label label = new Label(node.label);
-            label.setWrapText(true);
-            label.setMaxWidth(180);
-            label.setAlignment(javafx.geometry.Pos.CENTER);
-            label.setStyle("-fx-text-fill: black;");
-
-            // Add shape + label
-            nodePane.getChildren().addAll(shape, label);
-            StackPane.setAlignment(shape, Pos.CENTER);
-            StackPane.setAlignment(label, Pos.CENTER);
-
-            // Add to flow pane
-            flowPane.getChildren().add(nodePane);
-
-            // Save shape for highlighting
+            flowPane.getChildren().add(shape);
             nodeShapes.put(node.id, shape);
 
-            y += 100;
+            // Add text to Shape
+            Text text = new Text(node.label);
+            text.setWrappingWidth(node.width - 20);
+            text.setTextAlignment(TextAlignment.CENTER);
+
+            double textWidth = text.getLayoutBounds().getWidth();
+            double textHeight = text.getLayoutBounds().getHeight();
+
+            double textX = node.x + (node.width - Math.min(textWidth, node.width - 20)) / 2;
+            double textY = node.y + (node.height / 2) + (textHeight / 4);
+
+            text.setX(textX);
+            text.setY(textY);
+
+            flowPane.getChildren().add(text);
         }
+
+    }
+
+    private Shape createShape(FlowNode node) {
+        if (node.type == NodeType.DECISION) {
+            Polygon diamond = new Polygon(
+                    node.x + (node.width / 2), node.y,
+                    node.x + node.width, node.y + (node.height / 2),
+                    node.x + (node.width / 2), node.y + node.height,
+                    node.x, node.y + (node.height / 2)
+            );
+            return diamond;
+        }
+
+        return new Rectangle(node.x, node.y, node.width, node.height);
+    }
+
+
+    private FlowNode findNodeById(List<FlowNode> nodes, String id) {
+        for (FlowNode node : nodes) {
+            if (node.id.equals(id)) {
+                return node;
+            }
+        }
+        return null;
     }
 
     private void highlight(FlowNode node) {
         nodeShapes.values().forEach(shape -> {
-            shape.setFill(javafx.scene.paint.Color.WHITE);
-            shape.setStroke(javafx.scene.paint.Color.BLACK);
+            shape.setFill(Color.WHITE);
+            shape.setStroke(Color.BLACK);
             shape.setStrokeWidth(2);
         });
 
         Shape shape = nodeShapes.get(node.id);
         if (shape != null) {
-            shape.setFill(javafx.scene.paint.Color.YELLOW);
-            shape.setStroke(javafx.scene.paint.Color.BLACK);
-            shape.setStrokeWidth(2);
+            shape.setFill(Color.YELLOW);
         }
     }
 }

@@ -1,13 +1,13 @@
 package com.codeflow.model;
 
 public class FlowEdge {
-    public String from;
-    public String to;
-    public String label; // "true", "false", etc.
+    public String fromId;
+    public String toId;
+    public String label;
 
-    public FlowEdge(String from, String to, String label) {
-        this.from = from;
-        this.to = to;
+    public FlowEdge(String fromId, String toId, String label) {
+        this.fromId = fromId;
+        this.toId = toId;
         this.label = label;
     }
 }

@@ -7,10 +7,18 @@ public class FlowNode {
     public String id;
     public String label;
     public NodeType type;
+    public double x;
+    public double y;
+    public double width;
+    public double height;
 
-    public FlowNode(String id, String label, NodeType type) {
+    public FlowNode(String id, String label, NodeType type, double x, double y, double width, double height) {
         this.id = id;
         this.label = label;
         this.type = type;
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
     }
 }
