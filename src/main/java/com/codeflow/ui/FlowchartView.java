@@ -1,2 +1,4 @@
-package com.codeflow.ui;public class FlowchartView {
+package com.codeflow.ui;
+
+public class FlowchartView {
 }

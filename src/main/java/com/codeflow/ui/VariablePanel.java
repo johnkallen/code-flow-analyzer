@@ -1,2 +1,4 @@
-package com.codeflow.ui;public class VariablePanel {
+package com.codeflow.ui;
+
+public class VariablePanel {
 }
