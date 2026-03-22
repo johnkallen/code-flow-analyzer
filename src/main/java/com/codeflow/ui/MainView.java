@@ -4,6 +4,7 @@ import com.codeflow.engine.ExecutionEngine;
 import com.codeflow.enums.NodeType;
 import com.codeflow.model.FlowEdge;
 import com.codeflow.model.FlowNode;
+import com.codeflow.model.StepEvent;
 import com.codeflow.parser.CodeParser;
 import javafx.scene.Parent;
 import javafx.scene.control.Button;
@@ -34,7 +35,8 @@ public class MainView {
     private ExecutionEngine engine;
     private CodeParser.ParseResult lastResult;
 
-    private Map<String, Shape> nodeShapes = new HashMap<>();
+    private final Map<String, Shape> nodeShapes = new HashMap<>();
+    private final Map<String, Line> edgeLines = new HashMap<>();
 
     public MainView() {
 
@@ -101,16 +103,57 @@ public class MainView {
             return;
         }
 
-        FlowNode node = engine.step();
-        if (node == null) {
-            updateVariables(engine.getVariables());
+        StepEvent event = engine.step();
+
+        clearHighlights();
+        updateVariables(engine.getVariables());
+
+        if (event.type == StepEvent.StepType.COMPLETE) {
             statusLabel.setText("Execution complete.");
             return;
         }
 
-        highlight(node);
-        updateVariables(engine.getVariables());
-        statusLabel.setText("Stepped: " + node.label);
+        if (event.type == StepEvent.StepType.NODE) {
+            highlightNode(event.nodeId);
+            FlowNode node = findNodeById(lastResult.flowNodes, event.nodeId);
+            statusLabel.setText(node == null ? "Step" : "Node: " + node.label);
+            return;
+        }
+
+        if (event.type == StepEvent.StepType.EDGE) {
+            highlightEdge(event.edgeFromId, event.edgeToId);
+            statusLabel.setText("Transition");
+        }
+    }
+
+    private void clearHighlights() {
+        nodeShapes.values().forEach(shape -> {
+            shape.setFill(Color.WHITE);
+            shape.setStroke(Color.BLACK);
+            shape.setStrokeWidth(2);
+        });
+
+        edgeLines.values().forEach(line -> {
+            line.setStroke(Color.BLACK);
+            line.setStrokeWidth(2);
+        });
+    }
+
+    private void highlightNode(String nodeId) {
+        Shape shape = nodeShapes.get(nodeId);
+        if (shape != null) {
+            shape.setFill(Color.YELLOW);
+            shape.setStroke(Color.BLACK);
+            shape.setStrokeWidth(2);
+        }
+    }
+
+    private void highlightEdge(String fromId, String toId) {
+        Line line = edgeLines.get(fromId + "->" + toId);
+        if (line != null) {
+            line.setStroke(Color.RED);
+            line.setStrokeWidth(4);
+        }
     }
 
     private void updateVariables(Map<String, Object> vars) {
@@ -129,9 +172,9 @@ public class MainView {
     private void drawFlow(List<FlowNode> nodes, List<FlowEdge> edges) {
         flowPane.getChildren().clear();
         nodeShapes.clear();
+        edgeLines.clear();
 
         for (FlowEdge edge : edges) {
-
             if (edge.toId == null) {
                 continue;
             }
@@ -148,11 +191,12 @@ public class MainView {
             double toX = to.x + (to.width / 2);
             double toY = to.y;
 
-            // Draw Connecting Line
             Line line = new Line(fromX, fromY, toX, toY);
             line.setStroke(Color.BLACK);
             line.setStrokeWidth(2);
+
             flowPane.getChildren().add(line);
+            edgeLines.put(edge.key(), line);
 
             if (edge.label != null && !edge.label.isBlank()) {
                 Text edgeText = new Text(edge.label);
@@ -187,7 +231,6 @@ public class MainView {
 
             flowPane.getChildren().add(text);
         }
-
     }
 
     private Shape createShape(FlowNode node) {

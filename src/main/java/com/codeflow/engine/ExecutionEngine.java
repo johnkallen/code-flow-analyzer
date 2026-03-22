@@ -2,6 +2,8 @@ package com.codeflow.engine;
 
 import com.codeflow.model.ExecutionContext;
 import com.codeflow.model.FlowNode;
+import com.codeflow.enums.NodeType;
+import com.codeflow.model.StepEvent;
 
 import java.util.HashMap;
 import java.util.List;
@@ -11,6 +13,14 @@ public class ExecutionEngine {
 
     private final Map<String, FlowNode> nodesById = new HashMap<>();
     private final ExecutionContext context = new ExecutionContext();
+
+    private Phase phase = Phase.SHOW_NODE;
+    private String pendingNextNodeId;
+
+    private enum Phase {
+        SHOW_NODE,
+        SHOW_EDGE
+    }
 
     public ExecutionEngine(List<FlowNode> nodes, Map<String, Object> initialVariables) {
         for (FlowNode node : nodes) {
@@ -26,21 +36,45 @@ public class ExecutionEngine {
         }
     }
 
-    public FlowNode step() {
+    public StepEvent step() {
         if (context.finished || context.currentNodeId == null) {
-            context.finished = true;
-            return null;
+            return StepEvent.complete();
         }
 
-        FlowNode node = nodesById.get(context.currentNodeId);
-        if (node == null) {
+        FlowNode current = nodesById.get(context.currentNodeId);
+        if (current == null) {
             context.finished = true;
-            return null;
+            return StepEvent.complete();
         }
 
-        executeNode(node);
+        if (phase == Phase.SHOW_NODE) {
+            executeNode(current);
 
-        return node;
+            if (context.finished) {
+                return StepEvent.node(current.id);
+            }
+
+            phase = Phase.SHOW_EDGE;
+            return StepEvent.node(current.id);
+        }
+
+        if (phase == Phase.SHOW_EDGE) {
+            if (pendingNextNodeId == null) {
+                context.finished = true;
+                return StepEvent.complete();
+            }
+
+            String fromId = current.id;
+            String toId = pendingNextNodeId;
+
+            context.currentNodeId = pendingNextNodeId;
+            pendingNextNodeId = null;
+            phase = Phase.SHOW_NODE;
+
+            return StepEvent.edge(fromId, toId);
+        }
+
+        return StepEvent.complete();
     }
 
     public Map<String, Object> getVariables() {
@@ -51,16 +85,19 @@ public class ExecutionEngine {
         switch (node.type) {
             case DECISION -> {
                 boolean result = evaluateCondition(node.condition);
-                context.currentNodeId = result ? node.trueNextId : node.falseNextId;
+                pendingNextNodeId = result ? node.trueNextId : node.falseNextId;
+                if (pendingNextNodeId == null) {
+                    context.finished = true;
+                }
             }
             case END -> {
+                pendingNextNodeId = null;
                 context.finished = true;
-                context.currentNodeId = null;
             }
             default -> {
                 executeProcess(node);
-                context.currentNodeId = node.nextId;
-                if (context.currentNodeId == null) {
+                pendingNextNodeId = node.nextId;
+                if (pendingNextNodeId == null) {
                     context.finished = true;
                 }
             }
@@ -79,7 +116,6 @@ public class ExecutionEngine {
             expr = expr.substring(0, expr.length() - 1).trim();
         }
 
-        // int x = 5
         if (expr.matches("^(int|double|long|float|boolean|String)\\s+\\w+\\s*=.*$")) {
             String withoutType = expr.replaceFirst("^(int|double|long|float|boolean|String)\\s+", "");
             String[] parts = withoutType.split("=", 2);
@@ -90,7 +126,6 @@ public class ExecutionEngine {
             return;
         }
 
-        // x = 5
         if (expr.matches("^\\w+\\s*=.*$")) {
             String[] parts = expr.split("=", 2);
             String varName = parts[0].trim();
@@ -100,7 +135,6 @@ public class ExecutionEngine {
             return;
         }
 
-        // x++
         if (expr.matches("^\\w+\\+\\+$")) {
             String varName = expr.substring(0, expr.length() - 2).trim();
             Object current = context.variables.get(varName);
@@ -109,13 +143,11 @@ public class ExecutionEngine {
             return;
         }
 
-        // x--
         if (expr.matches("^\\w+--$")) {
             String varName = expr.substring(0, expr.length() - 2).trim();
             Object current = context.variables.get(varName);
             int value = toInt(current);
             context.variables.put(varName, value - 1);
-            return;
         }
     }
 

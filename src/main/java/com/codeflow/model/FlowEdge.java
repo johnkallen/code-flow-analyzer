@@ -10,4 +10,8 @@ public class FlowEdge {
         this.toId = toId;
         this.label = label;
     }
+
+    public String key() {
+        return fromId + "->" + toId;
+    }
 }
