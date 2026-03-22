@@ -1,17 +1,17 @@
 package com.codeflow.ui;
 
 import com.codeflow.engine.ExecutionEngine;
+import com.codeflow.enums.NodeType;
 import com.codeflow.model.FlowNode;
 import com.codeflow.parser.CodeParser;
+import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
-import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Pane;
-import javafx.scene.layout.VBox;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
 import javafx.scene.shape.Line;
 import javafx.scene.shape.Polygon;
 import javafx.scene.shape.Rectangle;
@@ -25,9 +25,10 @@ import java.util.Map;
 public class MainView {
     private BorderPane root = new BorderPane();
 
-    private TextArea codeEditor = new TextArea();
-    private VBox variablePanel = new VBox();
-    private Pane flowPane = new Pane();
+    private final TextArea codeEditor = new TextArea();
+    private final VBox variablePanel = new VBox();
+    private final Pane flowPane = new Pane();
+    private final Label statusLabel = new Label("Paste code and click Analyze.");
 
     private ExecutionEngine engine;
     private Map<String, Shape> nodeShapes = new HashMap<>();
@@ -69,34 +70,57 @@ public class MainView {
     }
 
     private void analyzeCode() {
-        System.out.println("Analyzing Code... ");
-        String code = codeEditor.getText();
-        CodeParser parser = new CodeParser();
+        try {
+            CodeParser parser = new CodeParser();
+            CodeParser.ParseResult result = parser.parse(codeEditor.getText());
 
-        var result = parser.parse(code);
+            engine = new ExecutionEngine(result.flowNodes);
 
-        updateVariables(result.variables);
-        drawFlow(result.flowNodes);
+            updateVariables(result.variables);
+            drawFlow(result.flowNodes);
+
+            statusLabel.setText("Analyze complete. Nodes: " + result.flowNodes.size());
+            System.out.println("Engine created with " + result.flowNodes.size() + " nodes.");
+
+        } catch (Exception ex) {
+            engine = null;
+            variablePanel.getChildren().clear();
+            flowPane.getChildren().clear();
+            nodeShapes.clear();
+
+            statusLabel.setText("Analyze failed: " + ex.getMessage());
+            ex.printStackTrace();
+        }
     }
 
     private void step() {
-        if (engine == null) return;
-        System.out.println("Step button... ");
+        if (engine == null) {
+            statusLabel.setText("Engine not initialized. Click Analyze first.");
+            return;
+        }
 
         FlowNode node = engine.step();
-        if (node != null) {
-            highlight(node);
+        if (node == null) {
+            statusLabel.setText("Execution complete.");
+            return;
         }
+
+        highlight(node);
+        statusLabel.setText("Stepped: " + node.label);
     }
+
 
     private void updateVariables(Map<String, Object> vars) {
         variablePanel.getChildren().clear();
 
-        vars.forEach((k, v) -> {
-            Label label = new Label(k + " = " + v);
-            variablePanel.getChildren().add(label);
-        });
+        if (vars.isEmpty()) {
+            variablePanel.getChildren().add(new Label("No variables found."));
+            return;
+        }
+
+        vars.forEach((k, v) -> variablePanel.getChildren().add(new Label(k + " = " + v)));
     }
+
 
 
     private void drawFlow(List<FlowNode> nodes) {
@@ -106,8 +130,23 @@ public class MainView {
         int y = 20;
 
         for (FlowNode node : nodes) {
-            Shape shape;
 
+            if (y > 20) {
+                Line line = new Line(150, y - 50, 150, y);
+                line.setStroke(Color.BLACK);
+                line.setStrokeWidth(2);
+                flowPane.getChildren().add(line);
+            }
+
+            StackPane nodePane = new StackPane();
+            nodePane.setLayoutX(50);
+            nodePane.setLayoutY(y);
+            nodePane.setPrefSize(200, 50);
+            nodePane.setMinSize(200, 50);
+            nodePane.setMaxSize(200, 50);
+
+            // Create Shape and Text
+            Shape shape;
             switch (node.type) {
                 case DECISION:
                     shape = new Polygon(
@@ -129,26 +168,26 @@ public class MainView {
                     break;
             }
 
-            shape.setLayoutX(50);
-            shape.setLayoutY(y);
             shape.setFill(javafx.scene.paint.Color.WHITE);
             shape.setStroke(javafx.scene.paint.Color.BLACK);
             shape.setStrokeWidth(2);
 
-            Text text = new Text(node.label);
-            text.setLayoutX(60);
-            text.setLayoutY(y + 30);
+            // Create centered label
+            Label label = new Label(node.label);
+            label.setWrapText(true);
+            label.setMaxWidth(180);
+            label.setAlignment(javafx.geometry.Pos.CENTER);
+            label.setStyle("-fx-text-fill: black;");
 
-            flowPane.getChildren().add(shape);
+            // Add shape + label
+            nodePane.getChildren().addAll(shape, label);
+            StackPane.setAlignment(shape, Pos.CENTER);
+            StackPane.setAlignment(label, Pos.CENTER);
 
-            if (y > 20) {
-                Line line = new Line(150, y - 50, 150, y);
-                line.setStroke(javafx.scene.paint.Color.BLACK);
-                line.setStrokeWidth(2);
-                flowPane.getChildren().add(line);
-            }
+            // Add to flow pane
+            flowPane.getChildren().add(nodePane);
 
-            flowPane.getChildren().add(text);
+            // Save shape for highlighting
             nodeShapes.put(node.id, shape);
 
             y += 100;

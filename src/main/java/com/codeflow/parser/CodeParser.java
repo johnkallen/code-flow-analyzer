@@ -29,7 +29,7 @@ public class CodeParser {
                 result.variables.put(v.getNameAsString(), null)
         );
 
-        Optional<MethodDeclaration> methodOpt = cu.findFirst(com.github.javaparser.ast.body.MethodDeclaration.class);
+        Optional<MethodDeclaration> methodOpt = cu.findFirst(MethodDeclaration.class);
         if (methodOpt.isPresent() && methodOpt.get().getBody().isPresent()) {
             BlockStmt body = methodOpt.get().getBody().get();
             for (Statement stmt : body.getStatements()) {
