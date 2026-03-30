@@ -2,9 +2,9 @@ package com.codeflow.engine;
 
 import com.codeflow.model.ExecutionContext;
 import com.codeflow.model.FlowNode;
-import com.codeflow.enums.NodeType;
 import com.codeflow.model.StepEvent;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,17 +48,13 @@ public class ExecutionEngine {
         }
 
         if (phase == Phase.SHOW_NODE) {
-            executeNode(current);
-
-            if (context.finished) {
-                return StepEvent.node(current.id);
-            }
-
             phase = Phase.SHOW_EDGE;
             return StepEvent.node(current.id);
         }
 
         if (phase == Phase.SHOW_EDGE) {
+            executeNode(current);
+
             if (pendingNextNodeId == null) {
                 context.finished = true;
                 return StepEvent.complete();
@@ -78,7 +74,33 @@ public class ExecutionEngine {
     }
 
     public Map<String, Object> getVariables() {
-        return context.variables;
+        return Collections.unmodifiableMap(context.variables);
+    }
+
+    public void setVariable(String name, Object value) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Variable name cannot be blank.");
+        }
+
+        if (!context.variables.containsKey(name)) {
+            throw new IllegalArgumentException("Unknown variable: " + name);
+        }
+
+        context.variables.put(name, value);
+    }
+
+    public void setVariables(Map<String, Object> updatedVariables) {
+        if (updatedVariables == null) {
+            return;
+        }
+
+        for (Map.Entry<String, Object> entry : updatedVariables.entrySet()) {
+            setVariable(entry.getKey(), entry.getValue());
+        }
+    }
+
+    public boolean hasVariable(String name) {
+        return context.variables.containsKey(name);
     }
 
     private void executeNode(FlowNode node) {

@@ -47,89 +47,21 @@ public class CodeParser {
 
         List<Statement> statements = methodOpt.get().getBody().get().getStatements();
 
-        double centerX = 300;
-        double currentY = 40;
-        double width = 200;
-        double height = 60;
-        double verticalGap = 100;
-        double branchOffset = 220;
-
+        Layout layout = new Layout();
         FlowNode previous = null;
 
         for (Statement stmt : statements) {
             if (stmt instanceof IfStmt ifStmt) {
-                FlowNode decision = new FlowNode(
-                        UUID.randomUUID().toString(),
-                        ifStmt.getCondition().toString(),
-                        NodeType.DECISION,
-                        centerX,
-                        currentY,
-                        width,
-                        height
-                );
-                decision.condition = ifStmt.getCondition().toString();
-                result.flowNodes.add(decision);
-
-                if (previous != null) {
-                    previous.nextId = decision.id;
-                    result.flowEdges.add(new FlowEdge(previous.id, decision.id, ""));
-                }
-
-                FlowNode thenNode = null;
-                FlowNode elseNode = null;
-
-                double branchY = currentY + verticalGap;
-
-                Statement thenStmt = unwrapFirst(ifStmt.getThenStmt());
-                if (thenStmt != null) {
-                    thenNode = createProcessNode(thenStmt, centerX - branchOffset, branchY, width, height);
-                    result.flowNodes.add(thenNode);
-                    result.flowEdges.add(new FlowEdge(decision.id, thenNode.id, "Yes"));
-                    decision.trueNextId = thenNode.id;
-                }
-
-                if (ifStmt.getElseStmt().isPresent()) {
-                    Statement elseStmt = unwrapFirst(ifStmt.getElseStmt().get());
-                    if (elseStmt != null) {
-                        elseNode = createProcessNode(elseStmt, centerX + branchOffset, branchY, width, height);
-                        result.flowNodes.add(elseNode);
-                        result.flowEdges.add(new FlowEdge(decision.id, elseNode.id, "No"));
-                        decision.falseNextId = elseNode.id;
-                    }
-                }
-
-                FlowNode joinNode = new FlowNode(
-                        UUID.randomUUID().toString(),
-                        "Join",
-                        NodeType.PROCESS,
-                        centerX,
-                        currentY + (verticalGap * 2),
-                        width,
-                        height
-                );
-                joinNode.expression = null;
-                result.flowNodes.add(joinNode);
-
-                if (thenNode != null) {
-                    thenNode.nextId = joinNode.id;
-                    result.flowEdges.add(new FlowEdge(thenNode.id, joinNode.id, ""));
-                } else {
-                    decision.trueNextId = joinNode.id;
-                    result.flowEdges.add(new FlowEdge(decision.id, joinNode.id, "Yes"));
-                }
-
-                if (elseNode != null) {
-                    elseNode.nextId = joinNode.id;
-                    result.flowEdges.add(new FlowEdge(elseNode.id, joinNode.id, ""));
-                } else {
-                    decision.falseNextId = joinNode.id;
-                    result.flowEdges.add(new FlowEdge(decision.id, joinNode.id, "No"));
-                }
-
-                previous = joinNode;
-                currentY += verticalGap * 3;
+                previous = addIf(result, ifStmt, previous, layout);
             } else {
-                FlowNode node = createProcessNode(stmt, centerX, currentY, width, height);
+                // Default if parser cannot find a specific type
+                FlowNode node = createProcessNode(
+                        stmt,
+                        layout.centerX,
+                        layout.currentY,
+                        layout.nodeWidth,
+                        layout.nodeHeight
+                );
                 result.flowNodes.add(node);
 
                 if (previous != null) {
@@ -138,24 +70,144 @@ public class CodeParser {
                 }
 
                 previous = node;
-                currentY += verticalGap;
+                layout.currentY += layout.verticalGap;
             }
         }
 
         return result;
     }
 
-    private Statement unwrapFirst(Statement stmt) {
-        if (stmt instanceof BlockStmt block) {
-            if (block.getStatements().isEmpty()) {
-                return null;
-            }
-            return block.getStatement(0);
+    private FlowNode addIf(ParseResult result, IfStmt ifStmt, FlowNode previous, Layout layout) {
+        double decisionX = layout.centerX;
+        double decisionY = layout.currentY;
+
+        FlowNode decision = new FlowNode(
+                UUID.randomUUID().toString(),
+                ifStmt.getCondition().toString(),
+                NodeType.DECISION,
+                decisionX,
+                decisionY,
+                layout.nodeWidth,
+                layout.nodeHeight
+        );
+        decision.condition = ifStmt.getCondition().toString();
+        result.flowNodes.add(decision);
+
+        if (previous != null) {
+            previous.nextId = decision.id;
+            result.flowEdges.add(new FlowEdge(previous.id, decision.id, ""));
         }
-        return stmt;
+
+        List<Statement> thenStatements = unwrapStatements(ifStmt.getThenStmt());
+        List<Statement> elseStatements = ifStmt.getElseStmt()
+                .map(this::unwrapStatements)
+                .orElseGet(ArrayList::new);
+
+        double trueX = layout.centerX - layout.branchOffset;
+        double falseX = layout.centerX + layout.branchOffset;
+        double branchStartY = layout.currentY + layout.verticalGap;
+
+        List<FlowNode> trueNodes = createVerticalBranch(result, thenStatements, trueX, branchStartY, layout);
+        List<FlowNode> falseNodes = createVerticalBranch(result, elseStatements, falseX, branchStartY, layout);
+
+        FlowNode trueFirst = trueNodes.isEmpty() ? null : trueNodes.get(0);
+        FlowNode falseFirst = falseNodes.isEmpty() ? null : falseNodes.get(0);
+
+        FlowNode trueLast = trueNodes.isEmpty() ? null : trueNodes.get(trueNodes.size() - 1);
+        FlowNode falseLast = falseNodes.isEmpty() ? null : falseNodes.get(falseNodes.size() - 1);
+
+        int trueDepth = Math.max(1, trueNodes.size());
+        int falseDepth = Math.max(1, falseNodes.size());
+        int branchDepth = Math.max(trueDepth, falseDepth);
+
+        double joinY = branchStartY + ((branchDepth - 1) * layout.verticalGap) + layout.verticalGap;
+
+        // Invisible join node: kept in model for routing/execution, not intended for drawing
+        FlowNode join = new FlowNode(
+                UUID.randomUUID().toString(),
+                "",
+                NodeType.JOIN,
+                layout.centerX,
+                joinY,
+                0,
+                0
+        );
+        join.expression = null;
+        result.flowNodes.add(join);
+
+        // Decision outgoing edges
+        if (trueFirst != null) {
+            decision.trueNextId = trueFirst.id;
+            result.flowEdges.add(new FlowEdge(decision.id, trueFirst.id, "True"));
+        } else {
+            decision.trueNextId = join.id;
+            result.flowEdges.add(new FlowEdge(decision.id, join.id, "True"));
+        }
+
+        if (falseFirst != null) {
+            decision.falseNextId = falseFirst.id;
+            result.flowEdges.add(new FlowEdge(decision.id, falseFirst.id, "False"));
+        } else {
+            decision.falseNextId = join.id;
+            result.flowEdges.add(new FlowEdge(decision.id, join.id, "False"));
+        }
+
+        // Branches reconnect to join
+        if (trueLast != null) {
+            trueLast.nextId = join.id;
+            result.flowEdges.add(new FlowEdge(trueLast.id, join.id, ""));
+        }
+
+        if (falseLast != null) {
+            falseLast.nextId = join.id;
+            result.flowEdges.add(new FlowEdge(falseLast.id, join.id, ""));
+        }
+
+        layout.currentY = joinY + layout.verticalGap;
+        return join;
     }
 
-    private FlowNode createProcessNode(Statement stmt, double x, double y, double width, double height) {
+    private List<FlowNode> createVerticalBranch(ParseResult result,
+                                                List<Statement> statements,
+                                                double x,
+                                                double startY,
+                                                Layout layout) {
+        List<FlowNode> nodes = new ArrayList<>();
+        FlowNode previous = null;
+        double y = startY;
+
+        for (Statement stmt : statements) {
+            FlowNode node = createProcessNode(stmt, x, y, layout.nodeWidth, layout.nodeHeight);
+            result.flowNodes.add(node);
+            nodes.add(node);
+
+            if (previous != null) {
+                previous.nextId = node.id;
+                result.flowEdges.add(new FlowEdge(previous.id, node.id, ""));
+            }
+
+            previous = node;
+            y += layout.verticalGap;
+        }
+
+        return nodes;
+    }
+
+    private List<Statement> unwrapStatements(Statement stmt) {
+        if (stmt instanceof BlockStmt block) {
+            return new ArrayList<>(block.getStatements());
+        }
+
+        List<Statement> list = new ArrayList<>();
+        list.add(stmt);
+        return list;
+    }
+
+    private FlowNode createProcessNode(Statement stmt,
+                                       double x,
+                                       double y,
+                                       double width,
+                                       double height) {
         NodeType type = stmt instanceof ReturnStmt ? NodeType.END : NodeType.PROCESS;
 
         FlowNode node = new FlowNode(
@@ -173,5 +225,14 @@ public class CodeParser {
         }
 
         return node;
+    }
+
+    private static class Layout {
+        double centerX = 320;
+        double currentY = 40;
+        double nodeWidth = 200;
+        double nodeHeight = 60;
+        double verticalGap = 110;
+        double branchOffset = 260;
     }
 }

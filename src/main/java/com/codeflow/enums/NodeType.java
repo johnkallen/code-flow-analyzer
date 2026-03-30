@@ -4,5 +4,6 @@ public enum NodeType {
     START,
     PROCESS,
     DECISION,
-    END
+    END,
+    JOIN
 }
