@@ -3,6 +3,7 @@ package com.codeflow.parser;
 import com.codeflow.model.FlowEdge;
 import com.codeflow.model.FlowNode;
 import com.codeflow.enums.NodeType;
+import com.codeflow.model.Pair;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.MethodDeclaration;
@@ -11,6 +12,8 @@ import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.IfStmt;
 import com.github.javaparser.ast.stmt.ReturnStmt;
 import com.github.javaparser.ast.stmt.Statement;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -21,66 +24,100 @@ import java.util.UUID;
 
 public class CodeParser {
 
+    private static final Logger logger = LoggerFactory.getLogger(CodeParser.class);
+
     public static class ParseResult {
         public Map<String, Object> variables = new LinkedHashMap<>();
         public List<FlowNode> flowNodes = new ArrayList<>();
         public List<FlowEdge> flowEdges = new ArrayList<>();
+
     }
 
     public ParseResult parse(String code) {
+        logger.info("\nStarting to parse code: \n{}", code);
         ParseResult result = new ParseResult();
 
         if (!code.contains("class")) {
+            logger.info("Wrapping code in a temporary class");
             code = "class Temp { void temp() { " + code + " } }";
         }
 
-        CompilationUnit cu = StaticJavaParser.parse(code);
+        try {
+            CompilationUnit cu = StaticJavaParser.parse(code);
+            logger.info("Parsed code into CompilationUnit");
 
-        cu.findAll(VariableDeclarator.class).forEach(v ->
-                result.variables.put(v.getNameAsString(), null)
-        );
+            cu.findAll(VariableDeclarator.class).forEach(v ->
+                    result.variables.put(v.getNameAsString(), null)
+            );
+            logger.debug("Collected {} variables", result.variables.size());
 
-        Optional<MethodDeclaration> methodOpt = cu.findFirst(MethodDeclaration.class);
-        if (methodOpt.isEmpty() || methodOpt.get().getBody().isEmpty()) {
-            return result;
-        }
-
-        List<Statement> statements = methodOpt.get().getBody().get().getStatements();
-
-        Layout layout = new Layout();
-        FlowNode previous = null;
-
-        for (Statement stmt : statements) {
-            if (stmt instanceof IfStmt ifStmt) {
-                previous = addIf(result, ifStmt, previous, layout);
-            } else {
-                // Default if parser cannot find a specific type
-                FlowNode node = createProcessNode(
-                        stmt,
-                        layout.centerX,
-                        layout.currentY,
-                        layout.nodeWidth,
-                        layout.nodeHeight
-                );
-                result.flowNodes.add(node);
-
-                if (previous != null) {
-                    previous.nextId = node.id;
-                    result.flowEdges.add(new FlowEdge(previous.id, node.id, ""));
-                }
-
-                previous = node;
-                layout.currentY += layout.verticalGap;
+            Optional<MethodDeclaration> methodOpt = cu.findFirst(MethodDeclaration.class);
+            if (methodOpt.isEmpty() || methodOpt.get().getBody().isEmpty()) {
+                logger.warn("No method body found in code");
+                return result;
             }
+
+            List<Statement> statements = methodOpt.get().getBody().get().getStatements();
+            logger.debug("Found {} statements in method body", statements.size());
+
+            Layout layout = new Layout();
+            FlowNode previous = null;
+
+            List<FlowNode> branchEnds = new ArrayList<>();
+
+            for (Statement stmt : statements) {
+                logger.debug("Processing statement: {}", stmt);
+                // Scan Statements and Identify different code types
+                if (stmt instanceof IfStmt ifStmt) {
+                    Pair<FlowNode, FlowNode> branches = addIf(result, ifStmt, previous, layout);
+                    branchEnds.add(branches.getFirst());
+                    branchEnds.add(branches.getSecond());
+                    previous = null; // No single predecessor after if-else
+                } else {
+                    // Default if parser cannot find a specific type
+                    FlowNode node = createProcessNode(
+                            stmt,
+                            layout.centerX,
+                            layout.currentY,
+                            layout.nodeWidth,
+                            layout.nodeHeight
+                    );
+                    result.flowNodes.add(node);
+
+                    // Connect to previous if exists (single predecessor)
+                    if (previous != null) {
+                        previous.nextId = node.id;
+                        result.flowEdges.add(new FlowEdge(previous.id, node.id, ""));
+                        logger.debug("Added edge from {} to {} with label '{}'", previous.id, node.id, "");
+                    }
+
+                    // Connect to branch ends (multiple predecessors)
+                    for (FlowNode end : branchEnds) {
+                        end.nextId = node.id;
+                        result.flowEdges.add(new FlowEdge(end.id, node.id, ""));
+                        logger.debug("Added edge from branch-end {} to {} with label '{}'", end.id, node.id, "");
+                    }
+
+                    previous = node;
+                    layout.currentY += layout.verticalGap;
+                    branchEnds.clear();
+                }
+            }
+            logger.info("Parsing completed successfully");
+        } catch (Exception e) {
+            logger.error("Error parsing code", e);
         }
 
         return result;
     }
 
-    private FlowNode addIf(ParseResult result, IfStmt ifStmt, FlowNode previous, Layout layout) {
+    private Pair<FlowNode, FlowNode> addIf(ParseResult result, IfStmt ifStmt, FlowNode previous, Layout layout) {
+
+        logger.debug("Processing if statement with condition: {}", ifStmt.getCondition().toString());
         double decisionX = layout.centerX;
         double decisionY = layout.currentY;
 
+        // Create decision node
         FlowNode decision = new FlowNode(
                 UUID.randomUUID().toString(),
                 ifStmt.getCondition().toString(),
@@ -93,11 +130,14 @@ public class CodeParser {
         decision.condition = ifStmt.getCondition().toString();
         result.flowNodes.add(decision);
 
+        // Connect to previous node
         if (previous != null) {
             previous.nextId = decision.id;
             result.flowEdges.add(new FlowEdge(previous.id, decision.id, ""));
+            logger.debug("Added edge from {} to decision {} with label '{}'", previous.id, decision.id, "");
         }
 
+        // Unwrap statements
         List<Statement> thenStatements = unwrapStatements(ifStmt.getThenStmt());
         List<Statement> elseStatements = ifStmt.getElseStmt()
                 .map(this::unwrapStatements)
@@ -107,64 +147,37 @@ public class CodeParser {
         double falseX = layout.centerX + layout.branchOffset;
         double branchStartY = layout.currentY + layout.verticalGap;
 
+        // Create true and false branches
         List<FlowNode> trueNodes = createVerticalBranch(result, thenStatements, trueX, branchStartY, layout);
         List<FlowNode> falseNodes = createVerticalBranch(result, elseStatements, falseX, branchStartY, layout);
 
         FlowNode trueFirst = trueNodes.isEmpty() ? null : trueNodes.get(0);
         FlowNode falseFirst = falseNodes.isEmpty() ? null : falseNodes.get(0);
 
-        FlowNode trueLast = trueNodes.isEmpty() ? null : trueNodes.get(trueNodes.size() - 1);
-        FlowNode falseLast = falseNodes.isEmpty() ? null : falseNodes.get(falseNodes.size() - 1);
-
-        int trueDepth = Math.max(1, trueNodes.size());
-        int falseDepth = Math.max(1, falseNodes.size());
-        int branchDepth = Math.max(trueDepth, falseDepth);
-
-        double joinY = branchStartY + ((branchDepth - 1) * layout.verticalGap) + layout.verticalGap;
-
-        // Invisible join node: kept in model for routing/execution, not intended for drawing
-        FlowNode join = new FlowNode(
-                UUID.randomUUID().toString(),
-                "",
-                NodeType.JOIN,
-                layout.centerX,
-                joinY,
-                0,
-                0
-        );
-        join.expression = null;
-        result.flowNodes.add(join);
-
-        // Decision outgoing edges
+        // Connect decision to true/false branches with "True"/"False" labels
         if (trueFirst != null) {
             decision.trueNextId = trueFirst.id;
             result.flowEdges.add(new FlowEdge(decision.id, trueFirst.id, "True"));
-        } else {
-            decision.trueNextId = join.id;
-            result.flowEdges.add(new FlowEdge(decision.id, join.id, "True"));
+            logger.debug("Added edge from {} to {} with label 'True'", decision.id, trueFirst.id);
         }
 
         if (falseFirst != null) {
             decision.falseNextId = falseFirst.id;
             result.flowEdges.add(new FlowEdge(decision.id, falseFirst.id, "False"));
-        } else {
-            decision.falseNextId = join.id;
-            result.flowEdges.add(new FlowEdge(decision.id, join.id, "False"));
+            logger.debug("Added edge from {} to {} with label 'False'", decision.id, falseFirst.id);
         }
 
-        // Branches reconnect to join
-        if (trueLast != null) {
-            trueLast.nextId = join.id;
-            result.flowEdges.add(new FlowEdge(trueLast.id, join.id, ""));
-        }
+        // Update layout Y position based on the deepest branch
+        int trueDepth = trueNodes.size();
+        int falseDepth = falseNodes.size();
+        int maxDepth = Math.max(trueDepth, falseDepth);
+        layout.currentY = branchStartY + (maxDepth * layout.verticalGap);
 
-        if (falseLast != null) {
-            falseLast.nextId = join.id;
-            result.flowEdges.add(new FlowEdge(falseLast.id, join.id, ""));
-        }
+        logger.debug("Created if-else branches with {} and {} nodes", trueNodes.size(), falseNodes.size());
 
-        layout.currentY = joinY + layout.verticalGap;
-        return join;
+        return new Pair<>(trueNodes.isEmpty() ? null : trueNodes.get(trueNodes.size() - 1),
+                falseNodes.isEmpty() ? null : falseNodes.get(falseNodes.size() - 1));
+
     }
 
     private List<FlowNode> createVerticalBranch(ParseResult result,
@@ -172,6 +185,7 @@ public class CodeParser {
                                                 double x,
                                                 double startY,
                                                 Layout layout) {
+        logger.debug("Creating vertical branch with {} statements", statements.size());
         List<FlowNode> nodes = new ArrayList<>();
         FlowNode previous = null;
         double y = startY;
@@ -232,7 +246,7 @@ public class CodeParser {
         double currentY = 40;
         double nodeWidth = 200;
         double nodeHeight = 60;
-        double verticalGap = 110;
+        double verticalGap = 100; // Spacing between nodes (top of Node to top of next node)
         double branchOffset = 260;
     }
 }

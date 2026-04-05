@@ -15,6 +15,8 @@ import javafx.scene.text.Text;
 import javafx.geometry.Pos;
 import javafx.scene.control.Label;
 import javafx.scene.layout.StackPane;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
@@ -34,6 +36,12 @@ public class FlowChartView {
     private static final double MAX_SCALE = 3.0;
     private static final double ZOOM_FACTOR = 1.1;
     private static final double FIT_PADDING = 40.0;
+
+    private static final Logger logger = LoggerFactory.getLogger(FlowChartView.class);
+
+    /*
+        IMPORTANT - All shapes X & Y position start in upper left corner
+     */
 
     public FlowChartView() {
         root.setPrefSize(1000, 1000);
@@ -56,6 +64,7 @@ public class FlowChartView {
 
     public void drawFlow(List<FlowNode> nodes, List<FlowEdge> edges) {
         clear();
+        logger.info("Starting to draw flow... ");
 
         for (FlowEdge edge : edges) {
             if (edge.toId == null) continue;
@@ -75,14 +84,6 @@ public class FlowChartView {
 
         for (FlowNode node : nodes) {
             if (node.type == NodeType.JOIN) continue;
-
-//            Shape shape = createShape(node);
-//            shape.setFill(Color.WHITE);
-//            shape.setStroke(Color.BLACK);
-//            shape.setStrokeWidth(2);
-//
-//            contentGroup.getChildren().add(shape);
-//            nodeShapes.put(node.id, shape);
 
             StackPane nodeContainer = new StackPane();
             nodeContainer.setLayoutX(node.x);
@@ -263,12 +264,16 @@ public class FlowChartView {
     }
 
     private List<Line> drawEdge(FlowNode from, FlowNode to, String label) {
+        logger.info("Drawing connecting LINE from [{}] to [{}], fromType:{} - toType:{} | with Line Label: {}",
+                from.label, to.label, from.type, to.type, label);
         List<Line> lines = new ArrayList<>();
 
         if (from.type == NodeType.DECISION) {
+
             double startY = from.y + (from.height / 2);
 
             if ("True".equalsIgnoreCase(label) || "Yes".equalsIgnoreCase(label)) {
+                logger.info("Draw DECISION Line LEFT");
                 double startX = from.x;
                 double endX = to.x + (to.width / 2);
                 double endY = to.y;
@@ -279,6 +284,7 @@ public class FlowChartView {
             }
 
             if ("False".equalsIgnoreCase(label) || "No".equalsIgnoreCase(label)) {
+                logger.info("Draw DECISION Line RIGHT");
                 double startX = from.x + from.width;
                 double endX = to.x + (to.width / 2);
                 double endY = to.y;
@@ -290,6 +296,7 @@ public class FlowChartView {
         }
 
         if (to.type == NodeType.JOIN) {
+            logger.info("Draw JOIN Line");
             double startX = from.x + (from.width / 2);
             double startY = from.y + from.height;
             double endX = to.x + (to.width / 2);
@@ -300,18 +307,25 @@ public class FlowChartView {
             return lines;
         }
 
-        double fromX = from.x + (from.width / 2);
-        double fromY = from.y + from.height;
-        double toX = to.x + (to.width / 2);
-        double toY = to.y;
+        double fromX = from.x + (from.width / 2); // Set X to Middle of Shape
+        double fromY = from.y + from.height; // Set Y to Bottom of Shape
+        double toX = to.x + (to.width / 2); // Set x to Middle of Shape
+        double toY = to.y; // Set Y to Top of Shape
 
+        // If FROM Shape and TO Shape are already aligned vertically - Create ONE line ONLY
         if (Math.abs(fromX - toX) < 0.5) {
+            logger.info("Draw SINGLE PROCESS Line - FROM x:{} y:{} - TO x:{} y:{}", fromX, fromY, toX, toY);
             lines.add(createLine(fromX, fromY, toX, toY));
             return lines;
         }
 
-        lines.add(createLine(fromX, fromY, fromX, toY));
-        lines.add(createLine(fromX, toY, toX, toY));
+        // FROM Shape is NOT vertically aligned - create multiple connected lines with right angles
+        double midY = fromY + ((toY - fromY) * 0.5); // Set Mid-way between two shapes
+        logger.info("Draw MULTIPLE PROCESS Line - FROM x:{} y:{} - TO x:{} y:{} - MID y:{}",
+                fromX, fromY, toX, toY, midY);
+        lines.add(createLine(fromX, fromY, fromX, midY)); // Vertical Line - 1st
+        lines.add(createLine(fromX, midY, toX, midY)); // Horizontal Line - 2nd
+        lines.add(createLine(toX, midY, toX, toY)); // Vertical Line - 3rd
         return lines;
     }
 
