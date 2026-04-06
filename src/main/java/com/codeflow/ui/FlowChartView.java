@@ -22,6 +22,8 @@ import java.util.*;
 
 public class FlowChartView {
 
+    private List<FlowNode> currentNodes;
+    private List<FlowEdge> currentEdges;
     private final Pane root = new Pane();
     private final Group contentGroup = new Group();
 
@@ -64,6 +66,8 @@ public class FlowChartView {
 
     public void drawFlow(List<FlowNode> nodes, List<FlowEdge> edges) {
         clear();
+        this.currentNodes = nodes;
+        this.currentEdges = edges;
         logger.info("Starting to draw flow... ");
 
         for (FlowEdge edge : edges) {
@@ -189,7 +193,7 @@ public class FlowChartView {
         double scaleX = availableWidth / layoutBounds.getWidth();
         double scaleY = availableHeight / layoutBounds.getHeight();
 
-        scale = clamp(Math.min(scaleX, scaleY), MIN_SCALE, MAX_SCALE);
+        scale = clamp(Math.min(scaleX, scaleY));
 
         // Apply scale first
         contentGroup.setScaleX(scale);
@@ -213,7 +217,7 @@ public class FlowChartView {
 
             double oldScale = scale;
             double zoomMultiplier = event.getDeltaY() > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
-            scale = clamp(scale * zoomMultiplier, MIN_SCALE, MAX_SCALE);
+            scale = clamp(scale * zoomMultiplier);
 
             if (Math.abs(scale - oldScale) < 0.0001) {
                 return;
@@ -383,7 +387,91 @@ public class FlowChartView {
                 .orElse(null);
     }
 
-    private double clamp(double value, double min, double max) {
-        return Math.max(min, Math.min(max, value));
+    private double clamp(double value) {
+        return Math.max(MIN_SCALE, Math.min(MAX_SCALE, value));
     }
+
+    public String generateDrawIOXML() {
+        if (currentNodes == null || currentEdges == null) {
+            return "";
+        }
+
+        StringBuilder xml = new StringBuilder();
+        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.append("<mxfile host=\"app.diagrams.net\" agent=\"Mozilla/5.0\">\n");
+        xml.append("  <diagram name=\"Page-1\" id=\"flowchart\">\n");
+        xml.append("    <mxGraphModel dx=\"1213\" dy=\"757\" grid=\"1\" gridSize=\"10\" guides=\"1\" tooltips=\"1\" connect=\"1\" arrows=\"1\" fold=\"1\" page=\"1\" pageScale=\"1\" pageWidth=\"850\" pageHeight=\"1100\" math=\"0\" shadow=\"0\">\n");
+        xml.append("      <root>\n");
+        xml.append("        <mxCell id=\"0\"/>\n");
+        xml.append("        <mxCell id=\"1\" parent=\"0\"/>\n");
+
+        // Add nodes
+        for (FlowNode node : currentNodes) {
+            String id = node.id;
+            String label = node.label;
+            double x = node.x;
+            double y = node.y;
+            double width = node.width;
+            double height = node.height;
+            String shape = node.type == NodeType.DECISION ? "rhombus" : "rectangle";
+
+            xml.append("        <mxCell id=\"").append(id)
+                    .append("\" value=\"").append(label)
+                    .append("\" style=\"shape=").append(shape)
+                    .append(";fillColor=none;strokeColor=black;whiteSpace=wrap;html=1;\" parent=\"1\" vertex=\"1\">\n");
+            xml.append("          <mxGeometry x=\"").append(x)
+                    .append("\" y=\"").append(y)
+                    .append("\" width=\"").append(width)
+                    .append("\" height=\"").append(height)
+                    .append("\" as=\"geometry\"/>\n");
+            xml.append("        </mxCell>\n");
+        }
+
+        // Add edges with waypoints
+        for (FlowEdge edge : currentEdges) {
+            String id = edge.key();
+            String fromId = edge.fromId;
+            String toId = edge.toId;
+            String label = edge.label != null ? edge.label : "";
+
+            // Find source and target nodes
+            FlowNode fromNode = currentNodes.stream()
+                    .filter(n -> n.id.equals(fromId))
+                    .findFirst()
+                    .orElse(null);
+            FlowNode toNode = currentNodes.stream()
+                    .filter(n -> n.id.equals(toId))
+                    .findFirst()
+                    .orElse(null);
+
+            if (fromNode == null || toNode == null) continue;
+
+            // Calculate edge waypoints
+            double fromX = fromNode.x + fromNode.width / 2;
+            double fromY = fromNode.y + fromNode.height;
+            double toX = toNode.x + toNode.width / 2;
+            double toY = toNode.y;
+
+            xml.append("        <mxCell id=\"").append(id)
+                    .append("\" value=\"").append(label)
+                    .append("\" source=\"").append(fromId)
+                    .append("\" target=\"").append(toId)
+                    .append("\" edge=\"1\" parent=\"1\" style=\"edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;\">\n");
+            xml.append("          <mxGeometry relative=\"1\" as=\"geometry\">\n");
+            xml.append("            <Array as=\"points\">\n");
+            xml.append("              <mxPoint x=\"").append(fromX).append("\" y=\"").append(fromY).append("\"/>\n");
+            xml.append("              <mxPoint x=\"").append(toX).append("\" y=\"").append(toY).append("\"/>\n");
+            xml.append("            </Array>\n");
+            xml.append("          </mxGeometry>\n");
+            xml.append("        </mxCell>\n");
+        }
+
+        xml.append("      </root>\n");
+        xml.append("    </mxGraphModel>\n");
+        xml.append("  </diagram>\n");
+        xml.append("</mxfile>");
+        return xml.toString();
+    }
+
+
 }

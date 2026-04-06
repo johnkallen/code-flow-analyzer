@@ -88,14 +88,14 @@ public class CodeParser {
                     if (previous != null) {
                         previous.nextId = node.id;
                         result.flowEdges.add(new FlowEdge(previous.id, node.id, ""));
-                        logger.debug("Added edge from {} to {} with label '{}'", previous.id, node.id, "");
+                        logger.debug("Added edge from {} to {} with label '{}'", previous.label, node.label, "");
                     }
 
                     // Connect to branch ends (multiple predecessors)
                     for (FlowNode end : branchEnds) {
                         end.nextId = node.id;
                         result.flowEdges.add(new FlowEdge(end.id, node.id, ""));
-                        logger.debug("Added edge from branch-end {} to {} with label '{}'", end.id, node.id, "");
+                        logger.debug("Added edge from branch-end {} to {} with label '{}'", end.label, node.label, "");
                     }
 
                     previous = node;
@@ -134,7 +134,7 @@ public class CodeParser {
         if (previous != null) {
             previous.nextId = decision.id;
             result.flowEdges.add(new FlowEdge(previous.id, decision.id, ""));
-            logger.debug("Added edge from {} to decision {} with label '{}'", previous.id, decision.id, "");
+            logger.debug("Added edge from {} to decision {} with label '{}'", previous.label, decision.label, "");
         }
 
         // Unwrap statements
@@ -158,13 +158,13 @@ public class CodeParser {
         if (trueFirst != null) {
             decision.trueNextId = trueFirst.id;
             result.flowEdges.add(new FlowEdge(decision.id, trueFirst.id, "True"));
-            logger.debug("Added edge from {} to {} with label 'True'", decision.id, trueFirst.id);
+            logger.debug("Added edge from {} to {} with label 'True'", decision.label, trueFirst.label);
         }
 
         if (falseFirst != null) {
             decision.falseNextId = falseFirst.id;
             result.flowEdges.add(new FlowEdge(decision.id, falseFirst.id, "False"));
-            logger.debug("Added edge from {} to {} with label 'False'", decision.id, falseFirst.id);
+            logger.debug("Added edge from {} to {} with label 'False'", decision.label, falseFirst.label);
         }
 
         // Update layout Y position based on the deepest branch
