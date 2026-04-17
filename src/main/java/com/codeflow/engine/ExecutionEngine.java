@@ -214,43 +214,53 @@ public class ExecutionEngine {
     }
 
     private boolean evaluateCondition(String condition) {
-        if (condition == null || condition.isBlank()) {
-            return false;
-        }
+        if (condition == null || condition.isBlank()) return false;
 
         String c = condition.trim();
 
+        // || has lowest precedence — split and short-circuit OR
+        if (c.contains("||")) {
+            for (String part : c.split("\\|\\|")) {
+                if (evaluateCondition(part.trim())) return true;
+            }
+            return false;
+        }
+
+        // && next — split and short-circuit AND
+        if (c.contains("&&")) {
+            for (String part : c.split("&&")) {
+                if (!evaluateCondition(part.trim())) return false;
+            }
+            return true;
+        }
+
+        // Single comparisons — check two-char operators before one-char to avoid mis-splits
         if (c.contains(">=")) {
-            String[] parts = c.split(">=");
+            String[] parts = c.split(">=", 2);
             return toInt(evaluateExpression(parts[0].trim())) >= toInt(evaluateExpression(parts[1].trim()));
         }
-
         if (c.contains("<=")) {
-            String[] parts = c.split("<=");
+            String[] parts = c.split("<=", 2);
             return toInt(evaluateExpression(parts[0].trim())) <= toInt(evaluateExpression(parts[1].trim()));
         }
-
         if (c.contains("==")) {
-            String[] parts = c.split("==");
+            String[] parts = c.split("==", 2);
             Object left = evaluateExpression(parts[0].trim());
             Object right = evaluateExpression(parts[1].trim());
             return left == null ? right == null : left.equals(right);
         }
-
         if (c.contains("!=")) {
-            String[] parts = c.split("!=");
+            String[] parts = c.split("!=", 2);
             Object left = evaluateExpression(parts[0].trim());
             Object right = evaluateExpression(parts[1].trim());
             return !(left == null ? right == null : left.equals(right));
         }
-
         if (c.contains(">")) {
-            String[] parts = c.split(">");
+            String[] parts = c.split(">", 2);
             return toInt(evaluateExpression(parts[0].trim())) > toInt(evaluateExpression(parts[1].trim()));
         }
-
         if (c.contains("<")) {
-            String[] parts = c.split("<");
+            String[] parts = c.split("<", 2);
             return toInt(evaluateExpression(parts[0].trim())) < toInt(evaluateExpression(parts[1].trim()));
         }
 

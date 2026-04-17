@@ -4,14 +4,18 @@ import com.codeflow.engine.ExecutionEngine;
 import com.codeflow.model.FlowNode;
 import com.codeflow.model.StepEvent;
 import com.codeflow.parser.CodeParser;
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.MethodDeclaration;
 import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.DirectoryChooser;
+import org.fxmisc.flowless.VirtualizedScrollPane;
+import org.fxmisc.richtext.CodeArea;
 
 import java.io.File;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Optional;
 
@@ -19,7 +23,7 @@ public class MainView {
 
     private final BorderPane root = new BorderPane();
 
-    private final TextArea codeEditor = new TextArea();
+    private final CodeArea codeEditor = new CodeArea();
     private final VariablePanel variablePanel = new VariablePanel();
     private final FlowChartView flowChartView = new FlowChartView();
     private final Label statusLabel = new Label("Paste code and click Analyze.");
@@ -29,81 +33,83 @@ public class MainView {
 
     public MainView() {
 
+        codeEditor.getStylesheets().add(
+                MainView.class.getResource("/com/codeflow/syntax.css").toExternalForm()
+        );
         codeEditor.setPrefWidth(500);
+
+        // Apply syntax highlighting on every keystroke
+        codeEditor.textProperty().addListener((obs, oldText, newText) -> {
+            if (!newText.isEmpty()) {
+                codeEditor.setStyleSpans(0, JavaSyntaxHighlighter.computeHighlighting(newText));
+            }
+        });
+
+        VirtualizedScrollPane<CodeArea> codeScroll = new VirtualizedScrollPane<>(codeEditor);
 
         // Create SplitPane with titled containers
         SplitPane split = new SplitPane();
-        split.getItems().addAll(codeEditor, flowChartView.getView());
         split.setDividerPositions(0.3);
 
         // Wrap Code Editor in a VBox with a title
         VBox codeContainer = new VBox(5);
         Label codeLabel = new Label("Code");
         codeLabel.setStyle("-fx-font-weight: bold; -fx-padding: 5 10; -fx-background-color: #e0e0e0;");
-        codeContainer.getChildren().addAll(
-                codeLabel,
-                codeEditor
-        );
-        codeContainer.setStyle("-fx-padding: 5; -fx-background-color: #f0f0f0;"); // Add background
+        VBox.setVgrow(codeScroll, Priority.ALWAYS);
+        codeContainer.getChildren().addAll(codeLabel, codeScroll);
+        codeContainer.setStyle("-fx-padding: 5; -fx-background-color: #f0f0f0;");
 
         // Wrap Flowchart View in a VBox with a title
         VBox flowchartContainer = new VBox(5);
         Label flowLabel = new Label("Flowchart");
         flowLabel.setStyle("-fx-font-weight: bold; -fx-padding: 5 10; -fx-background-color: #e0e0e0;");
-        flowchartContainer.getChildren().addAll(
-                flowLabel,
-                flowChartView.getView()
-        );
-        flowchartContainer.setStyle("-fx-padding: 5; -fx-background-color: #f0f0f0;"); // Add background
+        VBox.setVgrow(flowChartView.getView(), Priority.ALWAYS);
+        flowchartContainer.getChildren().addAll(flowLabel, flowChartView.getView());
+        flowchartContainer.setStyle("-fx-padding: 5; -fx-background-color: #f0f0f0;");
+
+        split.getItems().addAll(codeContainer, flowchartContainer);
 
         // Wrap Variables Panel in a VBox with a title
         VBox variableContainer = new VBox(5);
         Label varLabel = new Label("Variables");
         varLabel.setStyle("-fx-font-weight: bold; -fx-padding: 5 10; -fx-background-color: #e0e0e0;");
-        variableContainer.getChildren().addAll(
-                varLabel,
-                variablePanel.getView()
-        );
-        variableContainer.setStyle("-fx-padding: 5; -fx-background-color: #f0f0f0;"); // Match style
+        variableContainer.getChildren().addAll(varLabel, variablePanel.getView());
+        variableContainer.setStyle("-fx-padding: 5; -fx-background-color: #f0f0f0;");
 
         // Create HBox for controls
+        Button clearBtn = new Button("Clear");
         HBox controls = new HBox(10);
         controls.getChildren().addAll(
                 new Button("Analyze"),
                 new Button("Step"),
                 new Button("Fit"),
+                clearBtn,
                 statusLabel
         );
 
-        // Create spacer to push Export button to the right
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         Button exportBtn = new Button("Export");
         controls.getChildren().addAll(spacer, exportBtn);
-        controls.setStyle("-fx-padding: 25 0 0 0;");
+        controls.setStyle("-fx-padding: 10 15 15 15;");
 
-        // Set layout
         root.setTop(variableContainer);
         root.setCenter(split);
         root.setBottom(controls);
 
-        // Button actions
         ((Button) controls.getChildren().get(0)).setOnAction(e -> analyzeCode());
         ((Button) controls.getChildren().get(1)).setOnAction(e -> step());
         ((Button) controls.getChildren().get(2)).setOnAction(e -> flowChartView.fitToScreen());
+        clearBtn.setOnAction(e -> clearAll());
 
         exportBtn.setOnAction(e -> {
-
-            // Step 1: Choose directory
             DirectoryChooser directoryChooser = new DirectoryChooser();
             File selectedDirectory = directoryChooser.showDialog(root.getScene().getWindow());
-
             if (selectedDirectory == null) {
                 statusLabel.setText("Export cancelled.");
                 return;
             }
 
-            // Step 2: Choose filename
             TextInputDialog filenameDialog = new TextInputDialog("flowchart");
             filenameDialog.setTitle("Export to draw.io");
             filenameDialog.setHeaderText("Enter filename (without .drawio extension):");
@@ -112,17 +118,13 @@ public class MainView {
             Optional<String> result = filenameDialog.showAndWait();
             result.ifPresent(filename -> {
                 String fullPath = selectedDirectory.getAbsolutePath() + File.separator + filename + ".drawio";
-
-                // Step 3: Generate and save XML
                 String xmlContent = flowChartView.generateDrawIOXML();
                 if (xmlContent.isEmpty()) {
                     statusLabel.setText("No flowchart to export.");
                     return;
                 }
-
                 try {
-                    Path path = Paths.get(fullPath);
-                    Files.writeString(path, xmlContent);
+                    Files.writeString(Paths.get(fullPath), xmlContent);
                     statusLabel.setText("Exported to " + fullPath);
                 } catch (Exception ex) {
                     statusLabel.setText("Export failed: " + ex.getMessage());
@@ -131,18 +133,13 @@ public class MainView {
             });
         });
 
-
-        // Optional: Style Export button
-        (controls.getChildren().get(controls.getChildren().size() - 1))
-                .setStyle("-fx-padding: 5 15 5 15;");
-
+        exportBtn.setStyle("-fx-padding: 5 15 5 15;");
 
         variablePanel.setVariableChangeListener((name, value) -> {
             if (engine == null) {
                 statusLabel.setText("Analyze code first.");
                 return;
             }
-
             try {
                 engine.setVariable(name, value);
                 statusLabel.setText("Updated variable: " + name + " = " + value);
@@ -159,11 +156,13 @@ public class MainView {
 
     private void analyzeCode() {
         try {
+            String formatted = formatCode(codeEditor.getText());
+            codeEditor.replaceText(formatted);
+
             CodeParser parser = new CodeParser();
-            lastResult = parser.parse(codeEditor.getText());
+            lastResult = parser.parse(formatted);
 
             engine = new ExecutionEngine(lastResult.flowNodes, lastResult.variables);
-
             variablePanel.updateVariables(engine.getVariables());
             flowChartView.drawFlow(lastResult.flowNodes, lastResult.flowEdges);
 
@@ -172,12 +171,33 @@ public class MainView {
         } catch (Exception ex) {
             engine = null;
             lastResult = null;
-
             variablePanel.clear();
             flowChartView.clear();
-
             statusLabel.setText("Analyze failed: " + ex.getMessage());
             ex.printStackTrace();
+        }
+    }
+
+    private String formatCode(String code) {
+        try {
+            String wrapped = code.contains("class") ? code
+                    : "class Temp { void temp() { " + code + " } }";
+            CompilationUnit cu = StaticJavaParser.parse(wrapped);
+            Optional<MethodDeclaration> method = cu.findFirst(MethodDeclaration.class);
+            if (method.isEmpty() || method.get().getBody().isEmpty()) return code;
+
+            String body = method.get().getBody().get().toString();
+            // Strip outer { }
+            body = body.substring(body.indexOf('{') + 1, body.lastIndexOf('}')).stripTrailing();
+            // Dedent one level (JavaParser indents with 4 spaces)
+            String[] lines = body.split("\n");
+            StringBuilder sb = new StringBuilder();
+            for (String line : lines) {
+                sb.append(line.length() >= 4 ? line.substring(4) : line.stripLeading()).append("\n");
+            }
+            return sb.toString().strip();
+        } catch (Exception e) {
+            return code;
         }
     }
 
@@ -188,11 +208,11 @@ public class MainView {
         }
 
         StepEvent event = engine.step();
-
         flowChartView.clearHighlights();
         variablePanel.updateVariables(engine.getVariables());
 
         if (event.type == StepEvent.StepType.COMPLETE) {
+            applyCodeHighlight(0, 0);
             statusLabel.setText("Execution complete.");
             return;
         }
@@ -200,13 +220,37 @@ public class MainView {
         if (event.type == StepEvent.StepType.NODE) {
             flowChartView.highlightNode(event.nodeId);
             FlowNode node = flowChartView.findNodeById(lastResult.flowNodes, event.nodeId);
-            statusLabel.setText(node == null ? "Ready to execute node" : "Node: " + node.label);
+            if (node != null) {
+                applyCodeHighlight(node.beginLine, node.endLine);
+                statusLabel.setText("Node: " + node.label);
+            } else {
+                statusLabel.setText("Ready to execute node");
+            }
             return;
         }
 
         if (event.type == StepEvent.StepType.EDGE) {
             flowChartView.highlightEdge(event.edgeFromId, event.edgeToId);
+            FlowNode fromNode = flowChartView.findNodeById(lastResult.flowNodes, event.edgeFromId);
+            if (fromNode != null) {
+                applyCodeHighlight(fromNode.beginLine, fromNode.endLine);
+            }
             statusLabel.setText("Transition");
         }
+    }
+
+    private void applyCodeHighlight(int beginLine, int endLine) {
+        String text = codeEditor.getText();
+        if (text.isEmpty()) return;
+        codeEditor.setStyleSpans(0, JavaSyntaxHighlighter.computeHighlightingWithStep(text, beginLine, endLine));
+    }
+
+    private void clearAll() {
+        codeEditor.clear();
+        flowChartView.clear();
+        variablePanel.clear();
+        engine = null;
+        lastResult = null;
+        statusLabel.setText("Paste code and click Analyze.");
     }
 }

@@ -78,7 +78,7 @@ public class FlowChartView {
             if (from == null || to == null) continue;
 
             List<Line> segments = drawEdge(from, to, edge.label);
-            edgeLines.put(edge.key(), segments);
+            edgeLines.put(edge.fromId + "->" + edge.toId, segments);
             contentGroup.getChildren().addAll(segments);
 
             if (edge.label != null && !edge.label.isBlank()) {
@@ -288,13 +288,20 @@ public class FlowChartView {
             }
 
             if ("False".equalsIgnoreCase(label) || "No".equalsIgnoreCase(label)) {
-                logger.info("Draw DECISION Line RIGHT");
-                double startX = from.x + from.width;
+                logger.info("Draw DECISION Line DOWN");
+                double startX = from.x + (from.width / 2);
+                double startY2 = from.y + from.height;
                 double endX = to.x + (to.width / 2);
                 double endY = to.y;
 
-                lines.add(createLine(startX, startY, endX, startY));
-                lines.add(createLine(endX, startY, endX, endY));
+                if (Math.abs(startX - endX) < 0.5) {
+                    lines.add(createLine(startX, startY2, endX, endY));
+                } else {
+                    double midY = (startY2 + endY) / 2;
+                    lines.add(createLine(startX, startY2, startX, midY));
+                    lines.add(createLine(startX, midY, endX, midY));
+                    lines.add(createLine(endX, midY, endX, endY));
+                }
                 return lines;
             }
         }
@@ -351,8 +358,8 @@ public class FlowChartView {
                 x = from.x - 55;
                 y = from.y + (from.height / 2) - 8;
             } else if ("False".equalsIgnoreCase(label) || "No".equalsIgnoreCase(label)) {
-                x = from.x + from.width + 10;
-                y = from.y + (from.height / 2) - 8;
+                x = from.x + (from.width / 2) + 8;
+                y = from.y + from.height + 16;
             } else {
                 x = (from.x + to.x) / 2;
                 y = (from.y + to.y) / 2;

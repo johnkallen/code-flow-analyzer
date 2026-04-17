@@ -69,9 +69,12 @@ public class CodeParser {
                 logger.debug("Processing statement: {}", stmt);
                 // Scan Statements and Identify different code types
                 if (stmt instanceof IfStmt ifStmt) {
-                    Pair<FlowNode, FlowNode> branches = addIf(result, ifStmt, previous, layout);
-                    branchEnds.add(branches.getFirst());
-                    branchEnds.add(branches.getSecond());
+                    List<FlowNode> predecessors = new ArrayList<>(branchEnds);
+                    if (previous != null) predecessors.add(previous);
+                    branchEnds.clear();
+                    Pair<FlowNode, FlowNode> branches = addIf(result, ifStmt, predecessors, layout);
+                    if (branches.getFirst() != null) branchEnds.add(branches.getFirst());
+                    if (branches.getSecond() != null) branchEnds.add(branches.getSecond());
                     previous = null; // No single predecessor after if-else
                 } else {
                     // Default if parser cannot find a specific type
@@ -93,9 +96,16 @@ public class CodeParser {
 
                     // Connect to branch ends (multiple predecessors)
                     for (FlowNode end : branchEnds) {
-                        end.nextId = node.id;
-                        result.flowEdges.add(new FlowEdge(end.id, node.id, ""));
-                        logger.debug("Added edge from branch-end {} to {} with label '{}'", end.label, node.label, "");
+                        if (end.type == NodeType.DECISION && end.falseNextId == null) {
+                            // No-else decision: wire the false path directly to this node
+                            end.falseNextId = node.id;
+                            result.flowEdges.add(new FlowEdge(end.id, node.id, "False"));
+                            logger.debug("Added false edge from decision {} to {} (no-else)", end.label, node.label);
+                        } else {
+                            end.nextId = node.id;
+                            result.flowEdges.add(new FlowEdge(end.id, node.id, ""));
+                            logger.debug("Added edge from branch-end {} to {} with label '{}'", end.label, node.label, "");
+                        }
                     }
 
                     previous = node;
@@ -111,7 +121,7 @@ public class CodeParser {
         return result;
     }
 
-    private Pair<FlowNode, FlowNode> addIf(ParseResult result, IfStmt ifStmt, FlowNode previous, Layout layout) {
+    private Pair<FlowNode, FlowNode> addIf(ParseResult result, IfStmt ifStmt, List<FlowNode> predecessors, Layout layout) {
 
         logger.debug("Processing if statement with condition: {}", ifStmt.getCondition().toString());
         double decisionX = layout.centerX;
@@ -127,14 +137,18 @@ public class CodeParser {
                 layout.nodeWidth,
                 layout.nodeHeight
         );
-        decision.condition = ifStmt.getCondition().toString();
+        decision.condition  = ifStmt.getCondition().toString();
+        decision.beginLine  = ifStmt.getBegin().map(p -> p.line).orElse(0);
+        decision.endLine    = decision.beginLine;
         result.flowNodes.add(decision);
 
-        // Connect to previous node
-        if (previous != null) {
-            previous.nextId = decision.id;
-            result.flowEdges.add(new FlowEdge(previous.id, decision.id, ""));
-            logger.debug("Added edge from {} to decision {} with label '{}'", previous.label, decision.label, "");
+        // Connect all predecessors to this decision node
+        for (FlowNode pred : predecessors) {
+            if (pred != null) {
+                pred.nextId = decision.id;
+                result.flowEdges.add(new FlowEdge(pred.id, decision.id, ""));
+                logger.debug("Added edge from {} to decision {} with label '{}'", pred.label, decision.label, "");
+            }
         }
 
         // Unwrap statements
@@ -143,8 +157,8 @@ public class CodeParser {
                 .map(this::unwrapStatements)
                 .orElseGet(ArrayList::new);
 
-        double trueX = layout.centerX - layout.branchOffset;
-        double falseX = layout.centerX + layout.branchOffset;
+        double trueX  = layout.centerX - layout.branchOffset;
+        double falseX = layout.centerX; // false branch goes straight down
         double branchStartY = layout.currentY + layout.verticalGap;
 
         // Create true and false branches
@@ -175,8 +189,9 @@ public class CodeParser {
 
         logger.debug("Created if-else branches with {} and {} nodes", trueNodes.size(), falseNodes.size());
 
-        return new Pair<>(trueNodes.isEmpty() ? null : trueNodes.get(trueNodes.size() - 1),
-                falseNodes.isEmpty() ? null : falseNodes.get(falseNodes.size() - 1));
+        // When there is no else, the decision node itself is the false exit point
+        FlowNode falseEnd = falseNodes.isEmpty() ? decision : falseNodes.get(falseNodes.size() - 1);
+        return new Pair<>(trueNodes.isEmpty() ? null : trueNodes.get(trueNodes.size() - 1), falseEnd);
 
     }
 
@@ -237,6 +252,9 @@ public class CodeParser {
         if (type == NodeType.PROCESS) {
             node.expression = stmt.toString().trim();
         }
+
+        node.beginLine = stmt.getBegin().map(p -> p.line).orElse(0);
+        node.endLine   = stmt.getEnd().map(p -> p.line).orElse(0);
 
         return node;
     }

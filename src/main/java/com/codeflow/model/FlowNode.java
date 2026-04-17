@@ -11,6 +11,10 @@ public class FlowNode {
     public double width;
     public double height;
 
+    // source location (1-based, maps directly to CodeArea paragraph index via line-1)
+    public int beginLine = 0;
+    public int endLine   = 0;
+
     // execution metadata
     public String variableName;
     public String expression;

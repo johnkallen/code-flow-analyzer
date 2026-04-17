@@ -21,19 +21,25 @@ System.out.println(x);
 int x = 5;
 int y = 10;
 if (x > 0) {
-    x++;
+x++;
 } else {
-    x--;
+x--;
 }
 if (y < 10) {
-    y++;
+y++;
 } else {
-    y--;
+y--;
 }
 System.out.println(x,y);
 
 
-
+int x = 5;
+int y = 10;
+if (x > 0 && y < 15) {
+x++;
+y++;
+} 
+System.out.println(x,y);
 
 */
 

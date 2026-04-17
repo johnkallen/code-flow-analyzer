@@ -1,0 +1,13 @@
+.code-area {
+    -fx-padding: 8 0 0 8;
+}
+.code-area .text {
+    -fx-font-family: "Menlo", "Consolas", "Monaco", "Monospaced";
+    -fx-font-size: 13px;
+}
+.keyword   { -fx-fill: #0033b3; -fx-font-weight: bold; }
+.string    { -fx-fill: #067d17; }
+.number    { -fx-fill: #1750eb; }
+.comment   { -fx-fill: #8c8c8c; -fx-font-style: italic; }
+.annotation    { -fx-fill: #808000; }
+.step-highlight { -rtfx-background-color: #fff9c4; }
